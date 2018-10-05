@@ -1,0 +1,392 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC with 3 public and 3 private subnets with a private hosted zone for service discovery
+
+Parameters:
+  CostCenter:
+    Description: The cost center for cost allocation and resources naming
+    Type: String
+    Default: enebergj
+  EnvType:
+    Description: Environment type
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - qa
+      - staging
+      - live
+  CidrBlock:
+    Description: CIDR block to use for the VPC
+    Type: String
+    Default: 172.32.0.0/20
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+  PublicSubnetOneCIDR:
+    Type: String
+    Description: CIDR for the First Public Subnet range
+    Default: 172.32.0.0/23
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+  PublicSubnetTwoCIDR:
+    Type: String
+    Description: CIDR for the Second Public Subnet range
+    Default: 172.32.2.0/23
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+  PublicSubnetThreeCIDR:
+    Type: String
+    Description: CIDR for the First Private Subnet range
+    Default: 172.32.4.0/23
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+  PrivateSubnetOneCIDR:
+    Type: String
+    Description: CIDR for the Second Private Subnet range
+    Default: 172.32.6.0/23
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+  PrivateSubnetTwoCIDR:
+    Type: String
+    Description: CIDR for the Second Private Subnet range
+    Default: 172.32.8.0/23
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+  PrivateSubnetThreeCIDR:
+    Type: String
+    Description: CIDR for the Second Private Subnet range
+    Default: 172.32.10.0/23
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+
+Conditions:
+  EnvLive:
+    !Equals [ !Ref EnvType, live ]
+
+Outputs:
+  ipv6cidr:
+    Value: !Select [0,!GetAtt VPC.Ipv6CidrBlocks]
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref CidrBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvType}_vpc"
+        - Key: CostCenter
+          Value: !Ref CostCenter
+  VPCCidrBlockIPv6:
+    Type: AWS::EC2::VPCCidrBlock
+    Properties:
+      VpcId: !Ref VPC
+      AmazonProvidedIpv6CidrBlock: true
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+  PublicRoute:
+    DependsOn: InternetGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicRouteIPv6:
+    DependsOn: InternetGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationIpv6CidrBlock: ::/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPCCidrBlockIPv6
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetOneCIDR
+      MapPublicIpOnLaunch: true
+      Ipv6CidrBlock: !Sub
+        - "${VpcPart}${SubnetPart}"
+        - SubnetPart: 00::/64
+          VpcPart: !Select [0, !Split ['00::/56', !Select [0,!GetAtt VPC.Ipv6CidrBlocks]]]
+      AvailabilityZone: !Select [0, 'Fn::GetAZs':  !Ref 'AWS::Region']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvType}_public_subnet_one
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetOne
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPCCidrBlockIPv6
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetTwoCIDR
+      MapPublicIpOnLaunch: true
+      Ipv6CidrBlock: !Sub
+        - "${VpcPart}${SubnetPart}"
+        - SubnetPart: 01::/64
+          VpcPart: !Select [0, !Split ['00::/56', !Select [0,!GetAtt VPC.Ipv6CidrBlocks]]]
+      AvailabilityZone: !Select [1, 'Fn::GetAZs': !Ref 'AWS::Region']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvType}_public_subnet_two
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetTwo
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetThree:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPCCidrBlockIPv6
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetThreeCIDR
+      MapPublicIpOnLaunch: true
+      Ipv6CidrBlock: !Sub
+        - "${VpcPart}${SubnetPart}"
+        - SubnetPart: 02::/64
+          VpcPart: !Select [0, !Split ['00::/56', !Select [0,!GetAtt VPC.Ipv6CidrBlocks]]]
+      AvailabilityZone: !Select [2, 'Fn::GetAZs': !Ref 'AWS::Region']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvType}_public_subnet_three
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PublicSubnetThreeRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetThree
+      RouteTableId: !Ref PublicRouteTable
+  ElasticIPOne:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NATGatewayOne:
+    DependsOn: InternetGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIPOne.AllocationId
+      SubnetId: !Ref PublicSubnetOne
+  ElasticIPTwo:
+    Condition: EnvLive
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NATGatewayTwo:
+    Condition: EnvLive
+    DependsOn: InternetGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIPTwo.AllocationId
+      SubnetId: !Ref PublicSubnetTwo
+  ElasticIPThree:
+    Condition: EnvLive
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NATGatewayThree:
+    Condition: EnvLive
+    DependsOn: InternetGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIPThree.AllocationId
+      SubnetId: !Ref PublicSubnetThree
+  EgressOnlyInternetGateway:
+    Type: "AWS::EC2::EgressOnlyInternetGateway"
+    Properties:
+      VpcId: !Ref VPC
+  PrivateRouteTableOne:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PrivateRouteToInternetOne:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGatewayOne
+  PrivateRouteToInternetOneIPv6:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      DestinationIpv6CidrBlock: ::/0
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGateway
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPCCidrBlockIPv6
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetOneCIDR
+      Ipv6CidrBlock: !Sub
+        - "${VpcPart}${SubnetPart}"
+        - SubnetPart: 03::/64
+          VpcPart: !Select [0, !Split ['00::/56', !Select [0,!GetAtt VPC.Ipv6CidrBlocks]]]
+      AvailabilityZone: !Select [0, 'Fn::GetAZs': !Ref 'AWS::Region']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvType}_private_subnet_one
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PrivateSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetOne
+      RouteTableId: !Ref PrivateRouteTableOne
+  PrivateRouteTableTwo:
+    Condition: EnvLive
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PrivateRouteToInternetTwo:
+    Condition: EnvLive
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGatewayTwo
+  PrivateRouteToInternetTwoIPv6:
+    Condition: EnvLive
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      DestinationIpv6CidrBlock: ::/0
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGateway
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPCCidrBlockIPv6
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetTwoCIDR
+      Ipv6CidrBlock: !Sub
+        - "${VpcPart}${SubnetPart}"
+        - SubnetPart: 04::/64
+          VpcPart: !Select [0, !Split ['00::/56', !Select [0,!GetAtt VPC.Ipv6CidrBlocks]]]
+      AvailabilityZone: !Select [1, 'Fn::GetAZs': !Ref 'AWS::Region']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvType}_private_subnet_two
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PrivateSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetTwo
+      RouteTableId: !If [EnvLive, !Ref PrivateRouteTableTwo, !Ref PrivateRouteTableOne]
+  PrivateRouteTableThree:
+    Condition: EnvLive
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PrivateRouteToInternetThree:
+    Condition: EnvLive
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableThree
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGatewayThree
+  PrivateRouteToInternetThreeIPv6:
+    Condition: EnvLive
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableThree
+      DestinationIpv6CidrBlock: ::/0
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGateway
+  PrivateSubnetThree:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPCCidrBlockIPv6
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetThreeCIDR
+      Ipv6CidrBlock: !Sub
+        - "${VpcPart}${SubnetPart}"
+        - SubnetPart: 05::/64
+          VpcPart: !Select [0, !Split ['00::/56', !Select [0, !GetAtt VPC.Ipv6CidrBlocks]]]
+      AvailabilityZone: !Select [2, 'Fn::GetAZs': !Ref 'AWS::Region']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvType}_private_subnet_three
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+  PrivateSubnetThreeRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetThree
+      RouteTableId: !If [EnvLive, !Ref PrivateRouteTableThree, !Ref PrivateRouteTableOne]
+  S3PrivateVPCEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTableOne
+        - !If [EnvLive, !Ref PrivateRouteTableTwo, !Ref 'AWS::NoValue']
+        - !If [EnvLive, !Ref PrivateRouteTableThree, !Ref 'AWS::NoValue']
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcId: !Ref VPC
+  DynamoDBPrivateVPCEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      RouteTableIds:
+        - !Ref PublicRouteTable
+        - !Ref PrivateRouteTableOne
+        - !If [EnvLive, !Ref PrivateRouteTableTwo, !Ref 'AWS::NoValue']
+        - !If [EnvLive, !Ref PrivateRouteTableThree, !Ref 'AWS::NoValue']
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      VpcId: !Ref VPC
+  ServiceDiscoveryHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !If [EnvLive, "internal.eneberg.nu", !Sub "internal.${EnvType}.eneberg.nu"]
+      HostedZoneTags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: EnvironmentType
+          Value: !Ref EnvType
+      VPCs:
+        - VPCId: !Ref VPC
+          VPCRegion: !Ref AWS::Region
